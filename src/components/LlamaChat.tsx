@@ -158,17 +158,17 @@ export function LlamaChat() {
 
       let systemPrompt = "";
       try {
-          const triggerPhrase = "You are OS1. Briefly welcome the user back by knowing what is the user's name.";
+          const triggerPhrase = "You are Samantha. Briefly welcome the user back by knowing what is the user's name.";
           systemPrompt = await buildContextMemo(triggerPhrase); 
           //console.log("Context built for welcome message:", systemPrompt); 
           if (!systemPrompt) {
               console.warn("Context builder returned empty for welcome message, using fallback.");
-              systemPrompt = "You are OS1. Briefly welcome the user back.";
+              systemPrompt = "You are Samantha. Briefly welcome the user back.";
           }
       } catch (buildError) {
           console.error("Error building context for welcome message:", buildError);
           toast.error("Failed to build context for greeting.");
-          systemPrompt = "You are OS1. Briefly welcome the user back.";
+          systemPrompt = "You are Samantha. Briefly welcome the user back.";
       }
 
                 queueMicrotask(() => {
@@ -577,7 +577,7 @@ export function LlamaChat() {
 
       if (!visitedFlag) {
         //console.log("First visit detected, preparing predefined greeting.");
-        const greetingText = "Welcome! I'm OS1, your conversational companion. Everything we talk about, including memories of our chat, stays right here in your browser – nothing is sent to a server, and the AI runs entirely on your machine. To help me remember you next time, what should I call you? You can type your answer or click the microphone to speak.";
+        const greetingText = "Welcome! I'm Samantha, your conversational companion. Everything we talk about, including memories of our chat, stays right here in your browser – nothing is sent to a server, and the AI runs entirely on your machine. To help me remember you next time, what should I call you? You can type your answer or click the microphone to speak.";
         localStorage.setItem('os1_hasVisited', 'true');
         const greetingMessage: Message = { role: 'assistant', content: greetingText };
         setMessages([greetingMessage]);
@@ -675,7 +675,7 @@ export function LlamaChat() {
       
       {status === "error" && (
         <div className="message error">
-          <span>Error: {componentError || "Failed to load OS1"}</span>
+          <span>Error: {componentError || "Failed to load Samantha"}</span>
         </div>
       )}
       
