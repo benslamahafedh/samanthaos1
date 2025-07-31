@@ -11,7 +11,7 @@ async function getOpenAIService(): Promise<OpenAIService> {
 
 export async function generateEmbedding(text: string): Promise<number[]> {
   try {
-    const service = await getOpenAIService();
+    await getOpenAIService(); // Initialize service
     
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',

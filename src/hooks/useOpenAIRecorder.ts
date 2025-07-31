@@ -29,7 +29,6 @@ interface UseOpenAIRecorderReturn {
 export function useOpenAIRecorder({
   onTranscriptionUpdate,
   onRecordingStateChange,
-  onTranscriptionComplete,
   onSilenceDetected,
 }: UseOpenAIRecorderProps): UseOpenAIRecorderReturn {
   // Internal State

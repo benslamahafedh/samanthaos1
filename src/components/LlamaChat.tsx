@@ -3,7 +3,7 @@ import { Mic, MicOff, BrainCircuit} from "lucide-react";
 import { addMemory, preloadEmbeddingModel, getAllMemories, deleteMemory, MemoryRecord } from "@/lib/memory";
 import { toast } from "sonner";
 import { buildLlamaContext } from "@/lib/contextBuilder";
-import type { Voices, Message, TTSRequest } from "@/types/chat";
+import type { Voices, Message } from "@/types/chat";
 import { OS1Animation } from "./OS1Animation";
 import { AudioVisualizer } from "./AudioVisualizer";
 import "./OS1Animation.css";
@@ -30,7 +30,7 @@ export function LlamaChat() {
   
   const speed = 1;
   const selectedVoice: keyof Voices = "alloy";
-  const [isTTSProcessing, setIsTTSProcessing] = useState(false);
+  // Removed unused TTS processing state
   const [audioChunkQueue, setAudioChunkQueue] = useState<Blob[]>([]);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   
@@ -292,7 +292,7 @@ export function LlamaChat() {
     }
   }, [handleSubmit]); 
 
-  const handleSilenceSubmit = useCallback((_text: string, audioData: Float32Array | null) => {
+  const handleSilenceSubmit = useCallback((_text: string, _audioData: Float32Array | null) => {
     //console.log("LlamaChat: Silence duration met, triggering submit.");
     // Audio transcription is handled by the recorder hook, so we don't need to store audio data
     handleSubmit(); 
@@ -663,7 +663,7 @@ export function LlamaChat() {
   return (
     <div className="os1-container">
       <OS1Animation 
-        isTTSProcessing={isTTSProcessing || isProcessing} 
+        isTTSProcessing={isProcessing} 
         showTransformation={showLoadingAnimation}
       />
       
