@@ -245,14 +245,44 @@ export function useOpenAIRecorder({
         return;
       }
 
-      // Silence Detection
-      const silenceCheckSamples = Math.floor(WHISPER_SAMPLING_RATE * (SILENCE_DURATION_MS / 1000));
-      const sliceStart = Math.max(0, audioData.length - silenceCheckSamples);
-      const audioSliceForSilenceCheck = audioData.slice(sliceStart);
-      let rms = 0;
-      if (audioSliceForSilenceCheck.length > 0) {
-        rms = Math.sqrt(audioSliceForSilenceCheck.reduce((sum, sample) => sum + sample * sample, 0) / audioSliceForSilenceCheck.length);
-      }
+             // Audio Quality and Silence Detection
+       const silenceCheckSamples = Math.floor(WHISPER_SAMPLING_RATE * (SILENCE_DURATION_MS / 1000));
+       const sliceStart = Math.max(0, audioData.length - silenceCheckSamples);
+       const audioSliceForSilenceCheck = audioData.slice(sliceStart);
+       let rms = 0;
+       if (audioSliceForSilenceCheck.length > 0) {
+         rms = Math.sqrt(audioSliceForSilenceCheck.reduce((sum, sample) => sum + sample * sample, 0) / audioSliceForSilenceCheck.length);
+       }
+
+       // Check for suspicious audio patterns that might indicate system sounds
+       const suspiciousPatterns = [
+         // Check for very uniform audio (system sounds often have consistent patterns)
+         () => {
+           const variance = audioData.reduce((sum, sample, i) => {
+             if (i === 0) return 0;
+             return sum + Math.pow(sample - audioData[i - 1], 2);
+           }, 0) / (audioData.length - 1);
+           return variance < 0.0001; // Very low variance indicates uniform sound
+         },
+         // Check for audio that's too loud (system notifications)
+         () => {
+           const maxAmplitude = Math.max(...audioData.map(Math.abs));
+           return maxAmplitude > 0.8; // Very loud audio
+         },
+         // Check for audio that's too quiet (background noise)
+         () => {
+           return rms < 0.005; // Very quiet audio
+         }
+       ];
+
+       const hasSuspiciousPattern = suspiciousPatterns.some(pattern => pattern());
+       if (hasSuspiciousPattern) {
+         console.warn('Suspicious audio pattern detected, skipping transcription');
+         setIsTranscribing(false);
+         audioChunksRef.current = [];
+         resetSilenceTimer();
+         return;
+       }
 
       if (rms < SILENCE_THRESHOLD) {
         if (isRecordingRef.current && silenceStartTimeRef.current === null && hasTranscribedSpeechRef.current) {
@@ -284,7 +314,8 @@ export function useOpenAIRecorder({
         resetSilenceTimer();
 
         try {
-          const transcription = await openaiService.current!.transcribeAudio(blob);
+          // Use enhanced transcription with retry logic
+          const transcription = await openaiService.current!.transcribeAudioEnhanced(blob, 2);
           
           if (transcription && transcription.trim()) {
             const transcribedText = transcription.trim();
@@ -304,7 +335,7 @@ export function useOpenAIRecorder({
           }
         } catch (transcriptionError) {
           console.error("Transcription error:", transcriptionError);
-          setError("Failed to transcribe audio.");
+          setError("Failed to transcribe audio. Please try speaking more clearly.");
         }
         
         setIsTranscribing(false);
