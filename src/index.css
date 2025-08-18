@@ -201,3 +201,106 @@
     transform: scale(1.1);
   }
 }
+
+/* Mic UX enhancements */
+.mic-button-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.mic-button.ready {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.788);
+}
+
+/* Mic button base visuals */
+.mic-button {
+  width: 68px;
+  transform: scale(1.8);
+  transform-origin: center;
+  height: 68px;
+  border-radius: 9999px;
+  border: 2px solid white;
+  background: rgba(255, 255, 255, 0.06);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.mic-button .icon {
+  width: 28px;
+  height: 28px;
+}
+
+/* Ready subtle pulse color -> white */
+.mic-button.ready::after {
+  border: 2px solid rgba(255, 255, 255, 0.45);
+}
+
+@keyframes micPulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.6; }
+}
+
+.mic-hint {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.788);
+  min-height: 1.2em;
+  text-align: center;
+}
+
+/* Centered mic-only container */
+.mic-only-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 0 1.25rem;
+}
+
+/* Bottom dock for mic */
+.mic-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* allow clicks only on the button */
+}
+
+.mic-dock .mic-button-wrapper {
+  pointer-events: auto;
+}
+
+/* Speaking animation rings when recording */
+.mic-button.recording {
+  position: relative;
+}
+
+.mic-button.recording::before,
+.mic-button.recording::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  animation: speakRing 1.4s ease-out infinite;
+}
+
+.mic-button.recording::after {
+  inset: -18px;
+  border-color: rgba(255, 255, 255, 0.28);
+  animation-delay: 0.4s;
+}
+
+@keyframes speakRing {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  70% { transform: scale(1.15); opacity: 0.15; }
+  
+  100% { transform: scale(1.2); opacity: 0; }
+}

@@ -5,7 +5,8 @@ const WHISPER_SAMPLING_RATE = 16000;
 const PROCESS_INTERVAL = 1000;
 const RECORDER_REFRESH_INTERVAL = 30000;
 const MAX_CHUNKS = 50;
-const SILENCE_THRESHOLD = 0.01;
+const MAX_AUDIO_LENGTH = 30; // seconds
+const SILENCE_THRESHOLD = 0.003;
 const SILENCE_DURATION_MS = 2000;
 const DEBOUNCE_INTERVAL_MS = 1000;
 
@@ -62,6 +63,7 @@ export function useOpenAIRecorder({
   const lastEmittedTranscriptionRef = useRef<string | null>(null);
   const lastEmitTimeRef = useRef<number>(0);
   const lastProcessedChunksHashRef = useRef<string | null>(null);
+  const hasHeaderRef = useRef<boolean>(false);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -122,10 +124,14 @@ export function useOpenAIRecorder({
         recordingStartTimeRef.current = Date.now();
         lastProcessingTimeRef.current = Date.now();
         lastProcessedChunksHashRef.current = null; // Reset for new recording
+        hasHeaderRef.current = false;
       };
 
       recorderInstance.ondataavailable = (e) => {
         if (e.data.size > 0) {
+          if (audioChunksRef.current.length === 0) {
+            hasHeaderRef.current = true;
+          }
           audioChunksRef.current.push(e.data);
         } else {
           console.warn("Received empty audio chunk");
@@ -192,13 +198,59 @@ export function useOpenAIRecorder({
 
   const convertBlobToAudio = async (blob: Blob): Promise<Float32Array | null> => {
     try {
-      const arrayBuffer = await blob.arrayBuffer();
-      const audioContext = audioContextRef.current;
-      if (!audioContext) return null;
+      // Use a temporary AudioContext for decoding to avoid constraints from the main context sampleRate
+      const url = URL.createObjectURL(blob);
+      const tempCtx = new AudioContext();
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
 
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      const channelData = audioBuffer.getChannelData(0);
-      return new Float32Array(channelData);
+      if (arrayBuffer.byteLength < 100) {
+        console.warn("Skipping decode for very small ArrayBuffer:", arrayBuffer.byteLength);
+        URL.revokeObjectURL(url);
+        await tempCtx.close();
+        return null;
+      }
+
+      const decoded = await tempCtx.decodeAudioData(arrayBuffer);
+
+      // Cleanup URL and temp context early
+      URL.revokeObjectURL(url);
+      await tempCtx.close();
+
+      const originalAudio = decoded.getChannelData(0);
+
+      // If already at target sampling rate, use directly (last MAX_AUDIO_LENGTH seconds)
+      const maxSamplesAtOriginalRate = MAX_AUDIO_LENGTH * decoded.sampleRate;
+      const audioToProcess = originalAudio.length > maxSamplesAtOriginalRate
+        ? originalAudio.slice(-maxSamplesAtOriginalRate)
+        : originalAudio;
+
+      if (decoded.sampleRate === WHISPER_SAMPLING_RATE) {
+        return new Float32Array(audioToProcess);
+      }
+
+      // Resample to WHISPER_SAMPLING_RATE using OfflineAudioContext
+      const offlineCtx = new OfflineAudioContext(
+        1,
+        Math.ceil(audioToProcess.length * WHISPER_SAMPLING_RATE / decoded.sampleRate),
+        WHISPER_SAMPLING_RATE
+      );
+
+      const bufferCreateCtx = new AudioContext({ sampleRate: decoded.sampleRate });
+      const tempBuffer = bufferCreateCtx.createBuffer(
+        1,
+        audioToProcess.length,
+        decoded.sampleRate
+      );
+      tempBuffer.copyToChannel(audioToProcess, 0);
+      await bufferCreateCtx.close();
+
+      const source = offlineCtx.createBufferSource();
+      source.buffer = tempBuffer;
+      source.connect(offlineCtx.destination);
+      source.start();
+      const resampledBuffer = await offlineCtx.startRendering();
+      return resampledBuffer.getChannelData(0);
     } catch (error) {
       console.error("Error converting blob to audio:", error);
       return null;
@@ -206,7 +258,7 @@ export function useOpenAIRecorder({
   };
 
   const processLatestAudio = useCallback(async () => {
-    if (!audioContextRef.current || !openaiService.current || isTranscribing) {
+    if (!audioContextRef.current || !openaiService.current || isTranscribing || isRefreshingRef.current) {
       console.log("processLatestAudio: Skipping - context/transcribing check failed");
       return;
     }
@@ -232,12 +284,48 @@ export function useOpenAIRecorder({
       const mimeType = recorderRef.current?.mimeType || 'audio/webm';
       const blob = new Blob(chunksToProcess, { type: mimeType });
 
+      if (blob.size < 512) {
+        console.warn("processLatestAudio: Blob too small, skipping and refreshing recorder", { size: blob.size, mimeType });
+        setIsTranscribing(false);
+        audioChunksRef.current = [];
+        hasHeaderRef.current = false;
+        resetSilenceTimer();
+        if (isRecordingRef.current) {
+          refreshRecorder();
+        }
+        return;
+      }
+
       const audioData = await convertBlobToAudio(blob);
       finalAudioData = audioData;
 
       if (!audioData) {
+        // Fallback: attempt direct transcription even if local decode failed
+        try {
+          const transcription = await openaiService.current!.transcribeAudioEnhanced(blob, 1);
+          if (transcription && transcription.trim()) {
+            const transcribedText = transcription.trim();
+            setLatestTranscribedText(transcribedText);
+            hasTranscribedSpeechRef.current = true;
+
+            const now = Date.now();
+            if (transcribedText === lastEmittedTranscriptionRef.current &&
+                now - lastEmitTimeRef.current < DEBOUNCE_INTERVAL_MS) {
+              console.log("Transcription debounced - duplicate detected:", transcribedText.substring(0, 30));
+            } else {
+              console.log("Emitting new transcription (fallback):", transcribedText);
+              lastEmittedTranscriptionRef.current = transcribedText;
+              lastEmitTimeRef.current = now;
+              onTranscriptionUpdate(transcribedText);
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn("Fallback transcription after decode failure also failed:", fallbackErr);
+        }
+
         setIsTranscribing(false);
         audioChunksRef.current = [];
+        hasHeaderRef.current = false;
         resetSilenceTimer();
         if (isRecordingRef.current) {
           refreshRecorder();
@@ -254,35 +342,7 @@ export function useOpenAIRecorder({
          rms = Math.sqrt(audioSliceForSilenceCheck.reduce((sum, sample) => sum + sample * sample, 0) / audioSliceForSilenceCheck.length);
        }
 
-       // Check for suspicious audio patterns that might indicate system sounds
-       const suspiciousPatterns = [
-         // Check for very uniform audio (system sounds often have consistent patterns)
-         () => {
-           const variance = audioData.reduce((sum, sample, i) => {
-             if (i === 0) return 0;
-             return sum + Math.pow(sample - audioData[i - 1], 2);
-           }, 0) / (audioData.length - 1);
-           return variance < 0.0001; // Very low variance indicates uniform sound
-         },
-         // Check for audio that's too loud (system notifications)
-         () => {
-           const maxAmplitude = Math.max(...audioData.map(Math.abs));
-           return maxAmplitude > 0.8; // Very loud audio
-         },
-         // Check for audio that's too quiet (background noise)
-         () => {
-           return rms < 0.005; // Very quiet audio
-         }
-       ];
-
-       const hasSuspiciousPattern = suspiciousPatterns.some(pattern => pattern());
-       if (hasSuspiciousPattern) {
-         console.warn('Suspicious audio pattern detected, skipping transcription');
-         setIsTranscribing(false);
-         audioChunksRef.current = [];
-         resetSilenceTimer();
-         return;
-       }
+       // Skip aggressive pattern filtering; rely on RMS silence threshold only
 
       if (rms < SILENCE_THRESHOLD) {
         if (isRecordingRef.current && silenceStartTimeRef.current === null && hasTranscribedSpeechRef.current) {
@@ -295,6 +355,10 @@ export function useOpenAIRecorder({
               const silenceDuration = Date.now() - silenceStartTimeRef.current;
               if (silenceDuration >= SILENCE_DURATION_MS) {
                 audioChunksRef.current = [];
+                hasHeaderRef.current = false;
+                if (isRecordingRef.current) {
+                  refreshRecorder();
+                }
                 if (onSilenceDetected) {
                   onSilenceDetected(latestTranscribedText, finalAudioData);
                 }
@@ -356,7 +420,7 @@ export function useOpenAIRecorder({
       refreshRecorder();
       return;
     }
-    if (isRecordingRef.current && !isTranscribing && audioChunksRef.current.length > 0) {
+    if (isRecordingRef.current && !isTranscribing && !isRefreshingRef.current && hasHeaderRef.current && audioChunksRef.current.length > 0) {
       console.log("Periodic processing triggered");
       processLatestAudio();
     }
@@ -409,9 +473,7 @@ export function useOpenAIRecorder({
       if (recorderRef.current.state === "recording") {
         recorderRef.current.stop();
       } else {
-        console.warn("Recorder not recording during refresh attempt, state:", recorderRef.current.state);
-        isRefreshingRef.current = false;
-        return;
+        console.warn(`Recorder not inactive (state: ${recorderRef.current.state}) after refresh stop timeout, cannot restart.`);
       }
     } catch (e) {
       console.error("Error stopping recorder during refresh:", e);
@@ -424,6 +486,7 @@ export function useOpenAIRecorder({
         try {
           if (recorderRef.current.state === 'inactive') {
             audioChunksRef.current = [];
+            hasHeaderRef.current = false;
             recorderRef.current.start(500);
             scheduleRecorderRefresh();
           } else {
@@ -444,22 +507,23 @@ export function useOpenAIRecorder({
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
-    silenceStartTimeRef.current = null;
   }, []);
 
-  const startRecording = useCallback(() => {
-    if (!recorderRef.current || !transcriptionReady || isRecordingRef.current) {
+  const startRecordingInternal = useCallback(() => {
+    if (!recorderRef.current || isRecordingRef.current) {
       console.warn("Cannot start recording:", { hasRecorder: !!recorderRef.current, transcriptionReady, isRecording: isRecordingRef.current });
       return;
     }
-    
     try {
       audioChunksRef.current = [];
+      hasHeaderRef.current = false;
       resetSilenceTimer();
       hasTranscribedSpeechRef.current = false;
-
       recorderRef.current.start(500);
       setIsRecording(true);
+      if (!transcriptionReady) {
+        console.warn("Starting recording before transcription service flagged ready");
+      }
     } catch (err) {
       console.error("Error starting recording:", err);
       setError("Failed to start recording.");
@@ -467,24 +531,16 @@ export function useOpenAIRecorder({
     }
   }, [transcriptionReady, resetSilenceTimer]);
 
-  const stopRecordingInternal = useCallback((isManualStop = false) => {
+  const stopRecordingInternal = useCallback(() => {
     if (!recorderRef.current || !isRecordingRef.current) {
       return;
     }
-    
     clearRecorderRefresh();
     resetSilenceTimer();
     hasTranscribedSpeechRef.current = false;
-
     try {
-      if (recorderRef.current.state === "recording") {
+      if (recorderRef.current.state === 'recording') {
         recorderRef.current.stop();
-      } else {
-        console.warn("Stop called but recorder wasn't recording, state:", recorderRef.current.state);
-
-        if (isManualStop && audioChunksRef.current.length > 0 && !isTranscribing) {
-          processLatestAudio();
-        }
       }
     } catch (err) {
       console.error("Error stopping recording:", err);
@@ -492,19 +548,15 @@ export function useOpenAIRecorder({
     } finally {
       setIsRecording(false);
     }
-  }, [clearRecorderRefresh, resetSilenceTimer, isTranscribing, processLatestAudio]);
-
-  const stopRecording = useCallback(() => {
-    stopRecordingInternal(true);
-  }, [stopRecordingInternal]);
+  }, [clearRecorderRefresh, resetSilenceTimer]);
 
   return {
     isRecording,
     isTranscribing,
     transcriptionReady,
-    startRecording,
-    stopRecording,
+    startRecording: startRecordingInternal,
+    stopRecording: stopRecordingInternal,
     micStream,
     error,
   };
-} 
+}

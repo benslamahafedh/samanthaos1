@@ -143,9 +143,9 @@ export class OpenAIService {
 
       const formData = new FormData();
       formData.append('file', audioBlob, `audio.${fileExtension}`);
-      formData.append('model', 'whisper-1');
+      formData.append('model', 'gpt-4o-mini-transcribe');
       formData.append('language', 'en'); // Specify language for better accuracy
-      formData.append('response_format', 'verbose_json'); // Get more detailed response
+      formData.append('response_format', 'json'); // Get more detailed response
       formData.append('temperature', '0.2'); // Lower temperature for more consistent results
       formData.append('prompt', 'This is a conversation with Samantha, a virtual assistant. Please transcribe clearly and accurately.'); // Context prompt
 
@@ -212,10 +212,23 @@ export class OpenAIService {
           
           // Try with different temperature and prompt on retry
           const formData = new FormData();
-          formData.append('file', audioBlob, `audio.webm`);
-          formData.append('model', 'whisper-1');
+          let fileExtension = 'webm';
+          if (audioBlob.type) {
+            if (audioBlob.type.includes('mp3')) fileExtension = 'mp3';
+            else if (audioBlob.type.includes('wav')) fileExtension = 'wav';
+            else if (audioBlob.type.includes('m4a')) fileExtension = 'm4a';
+            else if (audioBlob.type.includes('mp4')) fileExtension = 'mp4';
+            else if (audioBlob.type.includes('mpeg')) fileExtension = 'mpeg';
+            else if (audioBlob.type.includes('mpga')) fileExtension = 'mpga';
+            else if (audioBlob.type.includes('oga')) fileExtension = 'oga';
+            else if (audioBlob.type.includes('ogg')) fileExtension = 'ogg';
+            else if (audioBlob.type.includes('flac')) fileExtension = 'flac';
+            else if (audioBlob.type.includes('webm')) fileExtension = 'webm';
+          }
+          formData.append('file', audioBlob, `audio.${fileExtension}`);
+          formData.append('model', 'gpt-4o-mini-transcribe');
           formData.append('language', 'en');
-          formData.append('response_format', 'verbose_json');
+          formData.append('response_format', 'json');
           formData.append('temperature', '0.1'); // Even lower temperature on retry
           formData.append('prompt', 'Clear speech transcription. Focus on accuracy.'); // Simplified prompt
 

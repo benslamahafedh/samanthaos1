@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, MicOff, BrainCircuit} from "lucide-react";
-import { addMemory, preloadEmbeddingModel, getAllMemories, deleteMemory, MemoryRecord } from "@/lib/memory";
+import { Mic, MicOff } from "lucide-react";
+import { addMemory, preloadEmbeddingModel } from "@/lib/memory";
 import { toast } from "sonner";
 import { buildLlamaContext } from "@/lib/contextBuilder";
 import type { Voices, Message } from "@/types/chat";
 import { OS1Animation } from "./OS1Animation";
-import { AudioVisualizer } from "./AudioVisualizer";
+// Removed visualizer import; no longer used
 import "./OS1Animation.css";
 import { useOpenAIRecorder } from "@/hooks/useOpenAIRecorder";
-import { MemoryViewer } from "./MemoryViewer";
+// MemoryViewer UI removed
 
 
 const DENIAL_PHRASES_FOR_STORAGE = [
@@ -57,16 +57,11 @@ export function LlamaChat() {
   const isProcessingRef = useRef(isProcessing);
   const lastSubmittedTextRef = useRef<string>("");
 
-  // --- State for Memory Viewer ---
-  const [isMemoryViewerOpen, setIsMemoryViewerOpen] = useState(false);
-  const [memoryList, setMemoryList] = useState<MemoryRecord[]>([]);
-  const [isMemoryLoading, setIsMemoryLoading] = useState(false); // Optional: for loading state
+  // --- Onboarding Guide State ---
   const [showGuide, setShowGuide] = useState(true);
-  // --- End Memory Viewer State ---
+  // --- End Onboarding Guide State ---
 
-  // --- Ref to track viewer state for callbacks ---
-  const isMemoryViewerOpenRef = useRef(isMemoryViewerOpen);
-  // --- End ref --- 
+  // --- Removed Memory Viewer refs ---
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
@@ -158,17 +153,17 @@ export function LlamaChat() {
 
       let systemPrompt = "";
       try {
-          const triggerPhrase = "You are Samantha. Briefly welcome the user back by knowing what is the user's name.";
+          const triggerPhrase = "You are Samantha, created by OMNIA OS. Briefly welcome the user back by knowing what is the user's name.";
           systemPrompt = await buildContextMemo(triggerPhrase); 
           //console.log("Context built for welcome message:", systemPrompt); 
           if (!systemPrompt) {
               console.warn("Context builder returned empty for welcome message, using fallback.");
-              systemPrompt = "You are Samantha. Briefly welcome the user back.";
+              systemPrompt = "You are Samantha, created by OMNIA OS. Briefly welcome the user back.";
           }
       } catch (buildError) {
           console.error("Error building context for welcome message:", buildError);
           toast.error("Failed to build context for greeting.");
-          systemPrompt = "You are Samantha. Briefly welcome the user back.";
+          systemPrompt = "You are Samantha, created by OMNIA OS. Briefly welcome the user back.";
       }
 
                 queueMicrotask(() => {
@@ -303,7 +298,6 @@ export function LlamaChat() {
     transcriptionReady,
     startRecording: startRecordingWhisper,
     stopRecording: stopRecordingWhisper,
-    micStream,
     error: recorderError,
   } = useOpenAIRecorder({
       onTranscriptionUpdate: handleTranscriptionUpdate,
@@ -397,11 +391,7 @@ export function LlamaChat() {
                   //console.log(`Input is short (${wordCount} words), storing directly.`);
                   addMemory(userInput, 'user')
                     .then(() => {
-                        //console.log("Short user input added to memory.");
-                        // Refresh viewer if open using ref
-                        if (isMemoryViewerOpenRef.current) {
-                            fetchMemories(); 
-                        }
+                        // Short user input added to memory.
                     })
                     .catch((memError: unknown) => { 
                         console.error("Failed to add short user input to memory:", memError);
@@ -444,11 +434,7 @@ export function LlamaChat() {
              const saveMemory = () => {
                  addMemory(summary.trim(), 'user')
                     .then(() => {
-                        //console.log("User input summary added to memory.");
-                        // Refresh viewer if open using ref
-                        if (isMemoryViewerOpenRef.current) {
-                            fetchMemories();
-                        }
+                        // Summary added to memory
                     })
                     .catch((memError: unknown) => { 
                         console.error("Failed to add summary to memory:", memError);
@@ -610,55 +596,17 @@ export function LlamaChat() {
     }
   }, [isAudioPlaying, audioChunkQueue.length, playNextChunk]);
 
-  // --- Handlers for Memory Viewer ---
-  const fetchMemories = useCallback(async () => {
-    setIsMemoryLoading(true);
-    try {
-      const memories = await getAllMemories();
-      // Sort by timestamp descending (newest first)
-      memories.sort((a, b) => b.timestamp - a.timestamp);
-      setMemoryList(memories);
-    } catch (err) {
-      console.error("Failed to fetch memories:", err);
-      toast.error("Could not load memories.");
-      setMemoryList([]); // Clear list on error
-    } finally {
-      setIsMemoryLoading(false);
-    }
-  }, []);
+  // --- Removed Memory Viewer handlers and effects ---
 
-  const toggleMemoryViewer = useCallback(async () => {
-    const opening = !isMemoryViewerOpen;
-    setIsMemoryViewerOpen(opening);
-    if (opening) {
-      // Fetch memories only when opening the viewer
-      await fetchMemories();
-    } else {
-      // Optionally clear the list when closing to save memory,
-      // or keep it cached if preferred.
-      // setMemoryList([]);
-    }
-  }, [isMemoryViewerOpen, fetchMemories]);
-
-  const handleDeleteMemory = useCallback(async (id: number) => {
-    //console.log(`Attempting to delete memory ID: ${id}`);
-    try {
-      await deleteMemory(id);
-      toast.success("Memory deleted.");
-      // Refresh the list after deletion
-      await fetchMemories();
-    } catch (err) {
-      //console.error(`Failed to delete memory ID ${id}:`, err);
-      toast.error("Could not delete memory.");
-    }
-  }, [fetchMemories]); // Depend on fetchMemories to ensure it's up-to-date
-  // --- End Memory Viewer Handlers ---
-
-  // --- Effect to keep viewer state ref updated ---
-  useEffect(() => {
-    isMemoryViewerOpenRef.current = isMemoryViewerOpen;
-  }, [isMemoryViewerOpen]);
-  // --- End effect --- 
+  // --- Mic UI hint text ---
+  const micIsReady = transcriptionReady && !recorderError;
+  const micHint = recorderError
+    ? "Microphone unavailable. Check browser permissions."
+    : !transcriptionReady
+      ? "Loading voice…"
+      : isRecording
+        ? "Listening… tap to stop"
+        : "Click the mic, then speak";
 
   return (
     <div className="os1-container">
@@ -697,28 +645,12 @@ export function LlamaChat() {
             </div>
           )}
           
-          {micStream && isRecording && (
-            <div className="audio-visualizer-container">
-              <div className="visualizer-glow"></div>
-              <div className="visualizer-inner">
-                <AudioVisualizer stream={micStream} className="os1-visualizer" />
-              </div>
-            </div>
-          )}
+          {/* Visualizer removed */}
           
-          <div className={`input-container ${inputReady ? 'ready' : ''}`}>
-            <button
-              className={`memory-button ${isMemoryViewerOpen ? 'active' : ''}`} 
-              onClick={toggleMemoryViewer}
-              disabled={isMemoryLoading} 
-              title="View Memories"
-            >
-              <BrainCircuit className="icon" />
-            </button>
-
+          <div className="mic-dock">
             <div className="mic-button-wrapper">
               <button
-                className={`mic-button ${isRecording ? 'recording' : ''}`}
+                className={`mic-button ${isRecording ? 'recording' : ''} ${micIsReady && !isRecording ? 'ready' : ''}`}
                 onClick={() => {
                   if (isRecording) {
                     stopRecordingWhisper();
@@ -728,20 +660,17 @@ export function LlamaChat() {
                     startRecordingWhisper();
                   }
                 }}
-                disabled={!transcriptionReady || !!recorderError}
+                disabled={!!recorderError}
                 title={recorderError ? recorderError : (isRecording ? "Stop recording" : "Start recording")}
+                aria-label={isRecording ? "Stop recording" : "Start recording"}
               >
                 {isRecording ? <MicOff className="icon" /> : <Mic className="icon" />}
               </button>
+              <div className="mic-hint" aria-live="polite">{micHint}</div>
             </div>
           </div>
 
-          <MemoryViewer
-            isOpen={isMemoryViewerOpen}
-            memories={memoryList}
-            onDelete={handleDeleteMemory}
-            isLoading={isMemoryLoading}
-          />
+          {/* MemoryViewer omitted in mic-only UI */}
         </>
       )}
       <div ref={messageEndRef} />
